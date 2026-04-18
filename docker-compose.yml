@@ -1,0 +1,10 @@
+version: '3.8'
+services:
+  api-dev:
+    build: .
+    container_name: nexflowx-api-dev
+    ports:
+      - "8080:8080" # Expõe na 8081 para o exterior, usa a 8080 lá dentro
+    env_file:
+      - .env
+    restart: unless-stopped

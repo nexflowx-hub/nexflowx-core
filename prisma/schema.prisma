@@ -1,0 +1,222 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  admin
+  operator
+  viewer
+  merchant
+  customer 
+}
+
+enum TransactionStatus {
+  holding_provider
+  fx_in_transit
+  inventory_wallet
+  distributed
+  pending
+  gateway_confirmed
+  failed
+  settled
+}
+
+model Currency {
+  code            String        @id
+  type            String
+  precision       Int
+  is_active       Boolean       @default(true)
+  wallets         Wallet[]
+  ledgerEntries   LedgerEntry[]
+  created_at      DateTime      @default(now())
+}
+
+enum LogisticsStatus {
+  processing
+  shipped
+  delivered
+}
+
+model User {
+  id                 String          @id @default(cuid())
+  username           String          @unique
+  password_hash      String
+  role               Role            @default(viewer)
+  preferred_provider String          @default("stripe")
+  webhook_url        String?
+  webhook_secret     String?
+  
+  transactions       Transaction[]
+  apiKeys            ApiKey[]
+  gateway_configs    GatewayConfig[] 
+
+  stores             Store[]         // 🚀 NOVA RELAÇÃO: Um User tem várias Lojas
+  wallets            Wallet[]        // 🚀 RELAÇÃO INVERSA PARA WALLET
+  payouts            Payout[]        // 🚀 RELAÇÃO INVERSA PARA PAYOUT
+  
+  created_at         DateTime        @default(now())
+}
+
+// 🚀 NOVA TABELA: Lojas (Multi-Tenant)
+model Store {
+  id             String          @id @default(cuid())
+  name           String
+  logo_url       String?
+  primary_color  String          @default("#111111")
+  accent_color   String          @default("#00FF41")
+  webhook_url    String?
+  webhook_secret String?
+  
+  user           User            @relation(fields: [user_id], references: [id])
+  user_id        String
+  
+  transactions   Transaction[]
+  gateways       GatewayConfig[]
+  
+  created_at     DateTime        @default(now())
+}
+
+model GatewayConfig {
+  id             String   @id @default(cuid())
+  provider_name  String
+  api_key        String
+  merchant_id    String
+  
+  user           User     @relation(fields: [user_id], references: [id])
+  user_id        String
+  
+  store          Store?   @relation(fields: [store_id], references: [id]) // 🚀 Opcional para manter compatibilidade
+  store_id       String?
+  
+  is_active      Boolean  @default(true)
+  created_at     DateTime @default(now())
+  
+  // Como agora pode pertencer à loja, o unique passa a ser a combinação user_id + provider + store_id
+  // Removido o @@unique antigo para flexibilidade
+}
+
+// ==========================================
+// 🏪 MODELO SAAS (MULTI-TENANT & MARCAS)
+// ==========================================
+
+// ==========================================
+// 💳 MOTOR DE GATEWAYS & SMART ROUTING
+// ==========================================
+
+// ==========================================
+// 🏦 CORE BANK (LEDGER & WALLETS)
+// ==========================================
+model Wallet {
+  id                String        @id @default(cuid())
+  user_id           String
+  currency_code     String
+  currency          Currency      @relation(fields: [currency_code], references: [code])
+  type              String        @default("merchant") 
+  balance_total     Decimal       @db.Decimal(20, 8) @default(0.0)
+  balance_available Decimal       @db.Decimal(20, 8) @default(0.0)
+  
+  user              User          @relation(fields: [user_id], references: [id])
+  entries           LedgerEntry[]
+  
+  created_at        DateTime      @default(now())
+  updated_at        DateTime      @updatedAt
+  @@unique([user_id, currency_code, type])
+}
+
+model LedgerTransaction {
+  id              String        @id @default(cuid())
+  type            String        
+  status          String        @default("pending")
+  reference_id    String?       
+  description     String?
+  entries         LedgerEntry[]
+  created_at      DateTime      @default(now())
+  cleared_at      DateTime?
+}
+
+model LedgerEntry {
+  id                    String            @id @default(cuid())
+  ledger_transaction_id String
+  ledger_transaction    LedgerTransaction @relation(fields: [ledger_transaction_id], references: [id])
+  
+  wallet_id             String
+  wallet                Wallet            @relation(fields: [wallet_id], references: [id])
+  
+  direction             String            
+  amount                Decimal           @db.Decimal(20, 8)
+  currency_code         String
+  currency              Currency          @relation(fields: [currency_code], references: [code])
+  
+  created_at            DateTime          @default(now())
+}
+
+// ==========================================
+// 💸 TRANSAÇÕES (CHECKOUT)
+// ==========================================
+model Transaction {
+  id                      String            @id @default(cuid())
+  amount                  Decimal           @db.Decimal(15, 2)
+  currency                String
+  status                  TransactionStatus @default(pending)
+  logistics_status        LogisticsStatus   @default(processing)
+
+  country_code            String            @default("UNKNOWN")
+  payment_method          String            @default("UNKNOWN")
+  provider_name           String            @default("stripe")
+
+  fee_amount              Decimal?          @db.Decimal(15, 2) @default(0.0)
+  net_amount              Decimal?          @db.Decimal(15, 2) @default(0.0)
+  provider_transaction_id String?           @unique
+  customer_email          String?
+  metadata                Json?             @default("{}")
+
+  payee                   User              @relation(fields: [payee_id], references: [id])
+  payee_id                String
+  
+  store                   Store?            @relation(fields: [store_id], references: [id]) // 🚀 NOVA RELAÇÃO
+  store_id                String?
+
+  webhook_events          WebhookEvent[]
+  created_at              DateTime          @default(now())
+  updated_at              DateTime          @updatedAt
+}
+
+model WebhookEvent {
+  id             String      @id @default(cuid())
+  transaction    Transaction @relation(fields: [transaction_id], references: [id])
+  transaction_id String
+  payload        Json
+  status         String      @default("pending")
+  attempts       Int         @default(0)
+  response_code  Int?
+  created_at     DateTime    @default(now())
+}
+
+model ApiKey {
+  id         String   @id @default(cuid())
+  name       String
+  key_hash   String   @unique
+  key_prefix String
+  user       User     @relation(fields: [user_id], references: [id])
+  user_id    String
+  created_at DateTime @default(now())
+}
+
+model Payout {
+  id            String   @id @default(cuid())
+  user_id       String
+  user          User     @relation(fields: [user_id], references: [id])
+  amount        Decimal  @db.Decimal(20, 8)
+  currency_code String
+  method        String
+  destination   String
+  status        String   @default("pending")
+  reference_id  String?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+}

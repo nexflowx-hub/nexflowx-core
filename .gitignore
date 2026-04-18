@@ -1,0 +1,23 @@
+# Dependências
+node_modules/
+
+# Build do TypeScript
+dist/
+
+# Ficheiros de Ambiente (SECREDOS - NUNCA SUBIR!)
+.env
+
+# Logs e Ficheiros de SO
+npm-debug.log*
+.DS_Store
+*.pem
+
+# Base de dados local (se usares SQLite, embora estejas com Postgres, é boa prática)
+*.db
+*.sqlite
+*.save
+injetar_chaves.js
+injetor_direto.js
+injetor_dev.js
+injetor_prod.js
+link_stripe.js
